@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import MonacoEditor from '@monaco-editor/react';
+import MonacoEditor, { type OnMount } from '@monaco-editor/react';
 import type { Note, Theme } from '../types';
 import { LANGUAGES } from '../types';
 
@@ -20,6 +20,7 @@ interface EditorProps {
   onDelete: (id: string) => void;
   onBack: () => void;
   onToggleSidebar: () => void;
+  onNavNote: (direction: 'up' | 'down') => void;
 }
 
 // Empty state shown when no note is selected
@@ -40,10 +41,23 @@ function EmptyState() {
   );
 }
 
-export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete, onBack, onToggleSidebar }: EditorProps) {
+export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete, onBack, onToggleSidebar, onNavNote }: EditorProps) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const deleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Always-current ref so Monaco's onMount closure never goes stale
+  const onNavNoteRef = useRef(onNavNote);
+  useEffect(() => { onNavNoteRef.current = onNavNote; }, [onNavNote]);
+
+  const handleMonacoMount: OnMount = (editor, monaco) => {
+    const { CtrlCmd, UpArrow, DownArrow } = {
+      CtrlCmd: monaco.KeyMod.CtrlCmd,
+      UpArrow: monaco.KeyCode.UpArrow,
+      DownArrow: monaco.KeyCode.DownArrow,
+    };
+    editor.addCommand(CtrlCmd | UpArrow, () => onNavNoteRef.current('up'));
+    editor.addCommand(CtrlCmd | DownArrow, () => onNavNoteRef.current('down'));
+  };
 
   // Reset per-note UI state
   useEffect(() => {
@@ -194,6 +208,7 @@ export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete
               value={note.content}
               theme={theme === 'dark' ? 'vs-dark' : 'vs'}
               onChange={(v) => onUpdate(note.id, { content: v ?? '' })}
+              onMount={handleMonacoMount}
               options={{
                 minimap: { enabled: false },
                 fontSize: 13.5,

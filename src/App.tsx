@@ -116,10 +116,8 @@ export default function App() {
   // Active note: either the unsaved draft or a persisted note
   const activeNote = (draft && draft.id === selectedId) ? draft : savedNote;
 
-  // Ctrl+Up / Ctrl+Down to navigate between notes
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (!e.ctrlKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
-    // Build the navigable list: draft (if unsaved) prepended to filtered saved notes
+  // Navigate to the previous/next note in the sidebar order
+  const navigateNote = useCallback((direction: 'up' | 'down') => {
     const navList = [
       ...(draft ? [draft] : []),
       ...filteredNotes.filter((n) => !draft || n.id !== draft.id),
@@ -127,15 +125,19 @@ export default function App() {
     if (navList.length < 2) return;
     const currentIdx = navList.findIndex((n) => n.id === selectedId);
     if (currentIdx === -1) return;
-    e.preventDefault();
     const nextIdx =
-      e.key === 'ArrowDown'
+      direction === 'down'
         ? Math.min(currentIdx + 1, navList.length - 1)
         : Math.max(currentIdx - 1, 0);
-    if (nextIdx !== currentIdx) {
-      selectNote(navList[nextIdx].id);
-    }
+    if (nextIdx !== currentIdx) selectNote(navList[nextIdx].id);
   }, [draft, filteredNotes, selectedId, selectNote]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ctrl+Up / Ctrl+Down for non-Monaco contexts (sidebar, title field, etc.)
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (!e.ctrlKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    navigateNote(e.key === 'ArrowDown' ? 'down' : 'up');
+  }, [navigateNote]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -171,6 +173,7 @@ export default function App() {
           onDelete={deleteNote}
           onBack={() => setMobileView('list')}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
+          onNavNote={navigateNote}
         />
       </main>
     </div>
