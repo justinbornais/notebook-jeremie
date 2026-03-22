@@ -43,20 +43,34 @@ function EmptyState() {
 
 export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete, onBack, onToggleSidebar, onNavNote }: EditorProps) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const titleRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const monacoEditorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const deleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Always-current ref so Monaco's onMount closure never goes stale
   const onNavNoteRef = useRef(onNavNote);
   useEffect(() => { onNavNoteRef.current = onNavNote; }, [onNavNote]);
 
   const handleMonacoMount: OnMount = (editor, monaco) => {
-    const { CtrlCmd, UpArrow, DownArrow } = {
+    monacoEditorRef.current = editor;
+    const { CtrlCmd, UpArrow, DownArrow, Shift, Tab } = {
       CtrlCmd: monaco.KeyMod.CtrlCmd,
       UpArrow: monaco.KeyCode.UpArrow,
       DownArrow: monaco.KeyCode.DownArrow,
+      Shift: monaco.KeyMod.Shift,
+      Tab: monaco.KeyCode.Tab,
     };
     editor.addCommand(CtrlCmd | UpArrow, () => onNavNoteRef.current('up'));
     editor.addCommand(CtrlCmd | DownArrow, () => onNavNoteRef.current('down'));
+    // Shift+Tab: focus title if at (1,1) with no selection; otherwise normal outdent
+    editor.addCommand(Shift | Tab, () => {
+      const pos = editor.getPosition();
+      const sel = editor.getSelection();
+      if (pos?.lineNumber === 1 && pos?.column === 1 && sel?.isEmpty()) {
+        titleRef.current?.focus();
+      } else {
+        editor.trigger('keyboard', 'editor.action.outdentLines', null);
+      }
+    });
   };
 
   // Reset per-note UI state
@@ -86,7 +100,7 @@ export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete
 
   return (
     <>
-      {/* Header bar */}
+      {/* Combined header: nav | mode toggle | lang select | delete */}
       <div className="nb-editor-header">
         <button className="nb-back-btn" onClick={onBack} aria-label="Back to notes list">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -95,7 +109,7 @@ export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete
           Notes
         </button>
 
-        {/* Sidebar toggle - desktop only */}
+        {/* Sidebar toggle — desktop only */}
         <button
           className="nb-sidebar-toggle-btn"
           onClick={onToggleSidebar}
@@ -114,6 +128,45 @@ export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete
             </svg>
           )}
         </button>
+
+        <div className="nb-mode-toggle" role="group" aria-label="Note mode">
+          <button
+            className={`nb-mode-btn${!note.isCode ? ' active' : ''}`}
+            onClick={() => onUpdate(note.id, { isCode: false })}
+            aria-pressed={!note.isCode}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
+            Text
+          </button>
+          <button
+            className={`nb-mode-btn${note.isCode ? ' active' : ''}`}
+            onClick={() => onUpdate(note.id, { isCode: true })}
+            aria-pressed={note.isCode}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="16 18 22 12 16 6"/>
+              <polyline points="8 6 2 12 8 18"/>
+            </svg>
+            Code
+          </button>
+        </div>
+
+        {note.isCode && (
+          <select
+            className="nb-lang-select"
+            value={note.language}
+            onChange={(e) => onUpdate(note.id, { language: e.target.value })}
+            aria-label="Programming language"
+          >
+            {LANGUAGES.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        )}
 
         <div className="nb-editor-actions">
           <button
@@ -143,61 +196,23 @@ export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete
         </div>
       </div>
 
-      {/* Mode toggle toolbar - always visible */}
-      <div className="nb-toolbar-row">
-        <div className="nb-toolbar">
-          <div className="nb-mode-toggle" role="group" aria-label="Note mode">
-            <button
-              className={`nb-mode-btn${!note.isCode ? ' active' : ''}`}
-              onClick={() => onUpdate(note.id, { isCode: false })}
-              aria-pressed={!note.isCode}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-              </svg>
-              Text
-            </button>
-            <button
-              className={`nb-mode-btn${note.isCode ? ' active' : ''}`}
-              onClick={() => onUpdate(note.id, { isCode: true })}
-              aria-pressed={note.isCode}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="16 18 22 12 16 6"/>
-                <polyline points="8 6 2 12 8 18"/>
-              </svg>
-              Code
-            </button>
-          </div>
-
-          {note.isCode && (
-            <select
-              className="nb-lang-select"
-              value={note.language}
-              onChange={(e) => onUpdate(note.id, { language: e.target.value })}
-              aria-label="Programming language"
-            >
-              {LANGUAGES.map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      </div>
-
       {note.isCode ? (
         /* Code mode: title above Monaco, Monaco fills remaining height */
         <>
           <div className="nb-code-title-row">
-            <textarea
+            <input
               ref={titleRef}
+              type="text"
               className="nb-title-input"
               placeholder="Untitled"
               value={note.title}
-              rows={1}
               onChange={(e) => onUpdate(note.id, { title: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab' && !e.shiftKey) {
+                  e.preventDefault();
+                  monacoEditorRef.current?.focus();
+                }
+              }}
               aria-label="Note title"
             />
           </div>
@@ -230,12 +245,12 @@ export default function Editor({ note, theme, sidebarVisible, onUpdate, onDelete
       ) : (
         /* Text mode: scrollable body with title + textarea */
         <div className="nb-editor-body">
-          <textarea
+          <input
             ref={titleRef}
+            type="text"
             className="nb-title-input"
             placeholder="Untitled"
             value={note.title}
-            rows={1}
             onChange={(e) => onUpdate(note.id, { title: e.target.value })}
             aria-label="Note title"
           />
