@@ -8,6 +8,16 @@ export interface Note {
   updatedAt: number;
 }
 
+export interface Folder {
+  id: string;
+  name: string;
+}
+
+// An item in the sidebar ordering list — either a folder or a root-level note
+export type SidebarItem =
+  | { type: 'folder'; id: string }
+  | { type: 'note'; id: string };
+
 export type Theme = 'light' | 'dark';
 
 export const LANGUAGES = [

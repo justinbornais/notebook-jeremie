@@ -1,16 +1,26 @@
-import { useState, useRef } from 'react';
-import type { Note, Theme } from '../types';
+import { useState, useRef, Fragment } from 'react';
+import type { Note, Folder, SidebarItem, Theme } from '../types';
 
 interface SidebarProps {
   notes: Note[];
+  draft: Note | null;
+  folders: Folder[];
+  sidebarOrder: SidebarItem[];
+  folderContents: Record<string, string[]>;
   selectedId: string | null;
   query: string;
   theme: Theme;
   totalCount: number;
   onQueryChange: (q: string) => void;
   onSelect: (id: string) => void;
-  onCreate: () => void;
+  onCreate: (folderId?: string) => void;
   onDelete: (id: string) => void;
+  onCreateFolder: (name: string) => void;
+  onRenameFolder: (id: string, name: string) => void;
+  onDeleteFolder: (id: string) => void;
+  onMoveNoteToFolder: (noteId: string, folderId: string | null, insertAt?: number) => void;
+  onReorderSidebar: (order: SidebarItem[]) => void;
+  onReorderFolder: (folderId: string, noteIds: string[]) => void;
   onExport: () => void;
   onImport: (file: File) => void;
   onToggleTheme: () => void;
@@ -27,7 +37,6 @@ function formatDate(ts: number): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-// Inline SVG notebook logo icon
 function NotebookIcon() {
   return (
     <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -47,8 +56,20 @@ function NotebookIcon() {
   );
 }
 
+type DragSource =
+  | { kind: 'root-item'; index: number }
+  | { kind: 'folder-note'; folderId: string; index: number };
+
+type DropTarget =
+  | { kind: 'root'; index: number }
+  | { kind: 'into-folder'; folderId: string; index: number };
+
 export default function Sidebar({
   notes,
+  draft,
+  folders,
+  sidebarOrder,
+  folderContents,
   selectedId,
   query,
   theme,
@@ -57,28 +78,214 @@ export default function Sidebar({
   onSelect,
   onCreate,
   onDelete,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onMoveNoteToFolder,
+  onReorderSidebar,
+  onReorderFolder,
   onExport,
   onImport,
   onToggleTheme,
 }: SidebarProps) {
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const deleteTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renamingValue, setRenamingValue] = useState('');
+  const [addingFolder, setAddingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [deleteFolderConfirmId, setDeleteFolderConfirmId] = useState<string | null>(null);
+  const deleteFolderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dragSource, setDragSource] = useState<DragSource | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+
+  // Build full note map including draft
+  const allNotes = new Map<string, Note>();
+  if (draft) allNotes.set(draft.id, draft);
+  for (const n of notes) allNotes.set(n.id, n);
+
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (note: Note) => {
+    if (!q) return true;
+    return note.title.toLowerCase().includes(q) || note.content.toLowerCase().includes(q);
+  };
 
   const handleCardDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (deleteConfirmId === id) {
-      if (deleteTimerRef[0]) clearTimeout(deleteTimerRef[0]);
-      deleteTimerRef[1](null);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
       setDeleteConfirmId(null);
       onDelete(id);
     } else {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
       setDeleteConfirmId(id);
-      const t = setTimeout(() => setDeleteConfirmId(null), 3000);
-      deleteTimerRef[1](t);
+      deleteTimerRef.current = setTimeout(() => setDeleteConfirmId(null), 3000);
     }
   };
+
+  const handleFolderDelete = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (deleteFolderConfirmId === id) {
+      if (deleteFolderTimerRef.current) clearTimeout(deleteFolderTimerRef.current);
+      deleteFolderTimerRef.current = null;
+      setDeleteFolderConfirmId(null);
+      onDeleteFolder(id);
+    } else {
+      if (deleteFolderTimerRef.current) clearTimeout(deleteFolderTimerRef.current);
+      setDeleteFolderConfirmId(id);
+      deleteFolderTimerRef.current = setTimeout(() => setDeleteFolderConfirmId(null), 3000);
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent, source: DragSource) => {
+    e.dataTransfer.effectAllowed = 'move';
+    setDragSource(source);
+  };
+
+  const handleDragEnd = () => {
+    setDragSource(null);
+    setDropTarget(null);
+  };
+
+  const handleRootDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropTarget({ kind: 'root', index });
+  };
+
+  const handleFolderDragOver = (e: React.DragEvent, folderId: string, index: number) => {
+    // Don't allow dropping folders into folders
+    if (dragSource?.kind === 'root-item' && sidebarOrder[dragSource.index]?.type === 'folder') return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setDropTarget({ kind: 'into-folder', folderId, index });
+  };
+
+  const handleRootDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (!dragSource) return;
+
+    if (dragSource.kind === 'root-item') {
+      const newOrder = [...sidebarOrder];
+      const [moved] = newOrder.splice(dragSource.index, 1);
+      const insertAt = dropIndex > dragSource.index ? dropIndex - 1 : dropIndex;
+      newOrder.splice(Math.max(0, insertAt), 0, moved);
+      onReorderSidebar(newOrder);
+    } else if (dragSource.kind === 'folder-note') {
+      const noteId = (folderContents[dragSource.folderId] ?? [])[dragSource.index];
+      if (noteId) onMoveNoteToFolder(noteId, null, dropIndex);
+    }
+
+    setDragSource(null);
+    setDropTarget(null);
+  };
+
+  const handleFolderDrop = (e: React.DragEvent, folderId: string, dropIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!dragSource) return;
+
+    if (dragSource.kind === 'root-item') {
+      const item = sidebarOrder[dragSource.index];
+      if (item?.type === 'note') {
+        onMoveNoteToFolder(item.id, folderId);
+      }
+    } else if (dragSource.kind === 'folder-note') {
+      const srcFolderId = dragSource.folderId;
+      const noteId = (folderContents[srcFolderId] ?? [])[dragSource.index];
+      if (!noteId) return;
+
+      if (srcFolderId === folderId) {
+        const contents = [...(folderContents[folderId] ?? [])];
+        contents.splice(dragSource.index, 1);
+        const insertAt = dropIndex > dragSource.index ? dropIndex - 1 : dropIndex;
+        contents.splice(Math.max(0, insertAt), 0, noteId);
+        onReorderFolder(folderId, contents);
+      } else {
+        onMoveNoteToFolder(noteId, folderId);
+      }
+    }
+
+    setDragSource(null);
+    setDropTarget(null);
+  };
+
+  const renderNoteCard = (
+    noteId: string,
+    dragSrc: DragSource,
+    onDragOverCard: (e: React.DragEvent) => void,
+    onDropCard: (e: React.DragEvent) => void,
+    indent = false,
+  ) => {
+    const note = allNotes.get(noteId);
+    if (!note || !matchesQuery(note)) return null;
+    const isActive = selectedId === note.id;
+    const isConfirm = deleteConfirmId === note.id;
+    return (
+      <div
+        draggable
+        onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, dragSrc); }}
+        onDragEnd={handleDragEnd}
+        onDragOver={onDragOverCard}
+        onDrop={onDropCard}
+        role="listitem"
+        className={[
+          'nb-note-card',
+          isActive ? 'active' : '',
+          indent ? 'nb-note-card--indented' : '',
+        ].filter(Boolean).join(' ')}
+        style={{ position: 'relative' }}
+        onClick={() => onSelect(note.id)}
+        tabIndex={0}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelect(note.id)}
+        aria-selected={isActive}
+      >
+        <div className="nb-note-card-drag-handle" aria-hidden="true">
+          <svg width="10" height="14" viewBox="0 0 10 14" fill="none" aria-hidden="true">
+            <circle cx="3" cy="2.5" r="1.2" fill="currentColor"/>
+            <circle cx="7" cy="2.5" r="1.2" fill="currentColor"/>
+            <circle cx="3" cy="7" r="1.2" fill="currentColor"/>
+            <circle cx="7" cy="7" r="1.2" fill="currentColor"/>
+            <circle cx="3" cy="11.5" r="1.2" fill="currentColor"/>
+            <circle cx="7" cy="11.5" r="1.2" fill="currentColor"/>
+          </svg>
+        </div>
+        <div className="nb-note-card-title">{note.title || 'Untitled'}</div>
+        <div className="nb-note-card-preview">
+          {note.content || (note.isCode ? '// empty snippet' : 'Empty note...')}
+        </div>
+        <div className="nb-note-card-meta">
+          <span className="nb-note-date">{formatDate(note.updatedAt)}</span>
+          {note.isCode && <span className="nb-code-badge">{note.language}</span>}
+        </div>
+        <button
+          className={`nb-card-delete-btn${isConfirm ? ' confirming' : ''}`}
+          onClick={(e) => handleCardDelete(e, note.id)}
+          aria-label={isConfirm ? 'Confirm delete' : 'Delete note'}
+          title={isConfirm ? 'Click again to confirm' : 'Delete note'}
+        >
+          {isConfirm ? (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          ) : (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            </svg>
+          )}
+        </button>
+      </div>
+    );
+  };
+
+  const filteredCount = [...allNotes.values()].filter(matchesQuery).length;
 
   return (
     <>
@@ -112,7 +319,7 @@ export default function Sidebar({
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
               </svg>
             )}
-            </button>
+          </button>
         </div>
 
         {/* Search */}
@@ -132,81 +339,289 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* New Note button */}
-      <button className="nb-new-btn" onClick={onCreate} aria-label="Create new note">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
-          <line x1="12" y1="5" x2="12" y2="19"/>
-          <line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        New note
-      </button>
+      {/* New Note + New Folder buttons */}
+      <div className="nb-sidebar-actions">
+        <button className="nb-new-btn" onClick={() => onCreate()} aria-label="Create new note">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          New note
+        </button>
+        <button
+          className="nb-new-folder-btn"
+          onClick={() => { setAddingFolder(true); setNewFolderName(''); }}
+          aria-label="Create new folder"
+          title="New folder"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            <line x1="12" y1="11" x2="12" y2="17"/>
+            <line x1="9" y1="14" x2="15" y2="14"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* Inline new-folder name input */}
+      {addingFolder && (
+        <div className="nb-folder-name-input-wrap">
+          <input
+            autoFocus
+            type="text"
+            className="nb-folder-name-input"
+            placeholder="Folder name…"
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newFolderName.trim()) {
+                onCreateFolder(newFolderName.trim());
+                setAddingFolder(false);
+              } else if (e.key === 'Escape') {
+                setAddingFolder(false);
+              }
+            }}
+            onBlur={() => {
+              if (newFolderName.trim()) onCreateFolder(newFolderName.trim());
+              setAddingFolder(false);
+            }}
+            aria-label="New folder name"
+          />
+        </div>
+      )}
 
       {/* Note count */}
       {totalCount > 0 && (
         <div className="nb-note-count">
-          {query
-            ? `${notes.length} of ${totalCount} note${totalCount !== 1 ? 's' : ''}`
+          {q
+            ? `${filteredCount} of ${totalCount} note${totalCount !== 1 ? 's' : ''}`
             : `${totalCount} note${totalCount !== 1 ? 's' : ''}`}
         </div>
       )}
 
-      {/* Notes list */}
+      {/* Notes + Folders list */}
       <div className="nb-notes-list" role="list">
-        {notes.length === 0 ? (
+        {sidebarOrder.length === 0 && !addingFolder ? (
           <div className="nb-empty-list">
-            {query
-              ? 'No notes match your search.'
-              : 'No notes yet.\nCreate your first note to get started.'}
+            {q ? 'No notes match your search.' : 'No notes yet.\nCreate your first note to get started.'}
           </div>
         ) : (
-          notes.map((note, i) => (
+          <>
+            {sidebarOrder.map((item, rootIndex) => {
+              const rootDropLine = (
+                <div
+                  className={`nb-root-drop-zone${dragSource && dropTarget?.kind === 'root' && dropTarget.index === rootIndex ? ' active' : ''}`}
+                  onDragOver={(e) => handleRootDragOver(e, rootIndex)}
+                  onDrop={(e) => handleRootDrop(e, rootIndex)}
+                />
+              );
+
+              if (item.type === 'note') {
+                const card = renderNoteCard(
+                  item.id,
+                  { kind: 'root-item', index: rootIndex },
+                  (e) => {
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    handleRootDragOver(e, e.clientY < r.top + r.height / 2 ? rootIndex : rootIndex + 1);
+                  },
+                  (e) => {
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    handleRootDrop(e, e.clientY < r.top + r.height / 2 ? rootIndex : rootIndex + 1);
+                  },
+                );
+                if (!card) return null;
+                return (
+                  <Fragment key={item.id}>
+                    {rootDropLine}
+                    {card}
+                  </Fragment>
+                );
+              }
+
+              // Folder
+              const folder = folders.find((f) => f.id === item.id);
+              if (!folder) return null;
+              const isFolderOpen = openFolders.has(folder.id);
+              const isOpen = isFolderOpen || !!q;
+              const folderNoteIds = folderContents[folder.id] ?? [];
+              const visibleCount = folderNoteIds.filter((nid) => {
+                const n = allNotes.get(nid);
+                return n && matchesQuery(n);
+              }).length;
+              if (q && visibleCount === 0) return null;
+              const isConfirmDelete = deleteFolderConfirmId === folder.id;
+              const isRenaming = renamingFolderId === folder.id;
+              const droppingIntoThis = dragSource && dropTarget?.kind === 'into-folder' && dropTarget.folderId === folder.id;
+
+              return (
+                <Fragment key={folder.id}>
+                  {rootDropLine}
+                  <div
+                    className={['nb-folder', droppingIntoThis ? 'nb-folder--drop-into' : ''].filter(Boolean).join(' ')}
+                    draggable={!isRenaming}
+                    onDragStart={(e) => handleDragStart(e, { kind: 'root-item', index: rootIndex })}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => {
+                      if (
+                        dragSource?.kind === 'folder-note' ||
+                        (dragSource?.kind === 'root-item' && sidebarOrder[dragSource.index]?.type === 'note')
+                      ) {
+                        handleFolderDragOver(e, folder.id, 0);
+                      } else {
+                        e.preventDefault();
+                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        handleRootDragOver(e, e.clientY < r.top + 20 ? rootIndex : rootIndex + 1);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (
+                        dragSource?.kind === 'folder-note' ||
+                        (dragSource?.kind === 'root-item' && sidebarOrder[dragSource.index]?.type === 'note')
+                      ) {
+                        handleFolderDrop(e, folder.id, 0);
+                      } else {
+                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        handleRootDrop(e, e.clientY < r.top + 20 ? rootIndex : rootIndex + 1);
+                      }
+                    }}
+                  >
+                    <div
+                      className="nb-folder-header"
+                      onClick={() => {
+                        if (!isRenaming) setOpenFolders((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(folder.id)) next.delete(folder.id);
+                          else next.add(folder.id);
+                          return next;
+                        });
+                      }}
+                    >
+                      <span className={`nb-folder-chevron${isOpen ? ' open' : ''}`} aria-hidden="true">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="nb-folder-icon">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                      </svg>
+                      {isRenaming ? (
+                        <input
+                          autoFocus
+                          className="nb-folder-rename-input"
+                          value={renamingValue}
+                          onChange={(e) => setRenamingValue(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') {
+                              if (renamingValue.trim()) onRenameFolder(folder.id, renamingValue.trim());
+                              setRenamingFolderId(null);
+                            } else if (e.key === 'Escape') {
+                              setRenamingFolderId(null);
+                            }
+                          }}
+                          onBlur={() => {
+                            if (renamingValue.trim()) onRenameFolder(folder.id, renamingValue.trim());
+                            setRenamingFolderId(null);
+                          }}
+                          aria-label="Rename folder"
+                        />
+                      ) : (
+                        <span className="nb-folder-name">{folder.name}</span>
+                      )}
+                      <span className="nb-folder-count">{folderNoteIds.length}</span>
+                      <div className="nb-folder-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="nb-folder-action-btn"
+                          onClick={() => {
+                            onCreate(folder.id);
+                            setOpenFolders((prev) => new Set([...prev, folder.id]));
+                          }}
+                          title="New note in folder"
+                          aria-label="New note in folder"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                          </svg>
+                        </button>
+                        <button
+                          className="nb-folder-action-btn"
+                          onClick={() => { setRenamingFolderId(folder.id); setRenamingValue(folder.name); }}
+                          title="Rename folder"
+                          aria-label="Rename folder"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                          </svg>
+                        </button>
+                        <button
+                          className={`nb-folder-action-btn nb-folder-delete-btn${isConfirmDelete ? ' confirming' : ''}`}
+                          onClick={(e) => handleFolderDelete(e, folder.id)}
+                          title={isConfirmDelete ? 'Click again to confirm' : 'Delete folder'}
+                          aria-label={isConfirmDelete ? 'Confirm delete folder' : 'Delete folder'}
+                        >
+                          {isConfirmDelete ? (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          ) : (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <polyline points="3 6 5 6 21 6"/>
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Folder notes */}
+                    {isOpen && (
+                      <div className="nb-folder-notes" role="list">
+                        {folderNoteIds.map((noteId, noteIndex) => {
+                          const card = renderNoteCard(
+                            noteId,
+                            { kind: 'folder-note', folderId: folder.id, index: noteIndex },
+                            (e) => {
+                              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                              handleFolderDragOver(e, folder.id, e.clientY < r.top + r.height / 2 ? noteIndex : noteIndex + 1);
+                            },
+                            (e) => {
+                              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                              handleFolderDrop(e, folder.id, e.clientY < r.top + r.height / 2 ? noteIndex : noteIndex + 1);
+                            },
+                            true,
+                          );
+                          if (!card) return null;
+                          return (
+                            <Fragment key={noteId}>
+                              <div
+                                className={`nb-folder-drop-zone${dragSource && dropTarget?.kind === 'into-folder' && dropTarget.folderId === folder.id && dropTarget.index === noteIndex ? ' active' : ''}`}
+                                onDragOver={(e) => handleFolderDragOver(e, folder.id, noteIndex)}
+                                onDrop={(e) => handleFolderDrop(e, folder.id, noteIndex)}
+                              />
+                              {card}
+                            </Fragment>
+                          );
+                        })}
+                        <div
+                          className={`nb-folder-drop-zone${dragSource && dropTarget?.kind === 'into-folder' && dropTarget.folderId === folder.id && dropTarget.index === folderNoteIds.length ? ' active' : ''}`}
+                          onDragOver={(e) => handleFolderDragOver(e, folder.id, folderNoteIds.length)}
+                          onDrop={(e) => handleFolderDrop(e, folder.id, folderNoteIds.length)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </Fragment>
+              );
+            })}
+
+            {/* Root-level drop zone at the very bottom */}
             <div
-              key={note.id}
-              role="listitem"
-              className={`nb-note-card${selectedId === note.id ? ' active' : ''}${hoveredId === note.id ? ' hovered' : ''}`}
-              style={{ animationDelay: `${i * 35}ms`, position: 'relative' }}
-              onClick={() => onSelect(note.id)}
-              onMouseEnter={() => setHoveredId(note.id)}
-              onMouseLeave={() => { setHoveredId(null); }}
-              tabIndex={0}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelect(note.id)}
-              aria-selected={selectedId === note.id}
-            >
-              <div className="nb-note-card-title">
-                {note.title || 'Untitled'}
-              </div>
-              <div className="nb-note-card-preview">
-                {note.content || (note.isCode ? '// empty snippet' : 'Empty note...')}
-              </div>
-              <div className="nb-note-card-meta">
-                <span className="nb-note-date">{formatDate(note.updatedAt)}</span>
-                {note.isCode && (
-                  <span className="nb-code-badge">{note.language}</span>
-                )}
-              </div>
-              {/* Hover delete button */}
-              {(hoveredId === note.id || deleteConfirmId === note.id) && (
-                <button
-                  className={`nb-card-delete-btn${deleteConfirmId === note.id ? ' confirming' : ''}`}
-                  onClick={(e) => handleCardDelete(e, note.id)}
-                  aria-label={deleteConfirmId === note.id ? 'Confirm delete' : 'Delete note'}
-                  title={deleteConfirmId === note.id ? 'Click again to confirm' : 'Delete note'}
-                >
-                  {deleteConfirmId === note.id ? (
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                  ) : (
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                    </svg>
-                  )}
-                </button>
-              )}
-            </div>
-          ))
+              className={`nb-root-drop-zone${dragSource && dropTarget?.kind === 'root' && dropTarget.index === sidebarOrder.length ? ' active' : ''}`}
+              onDragOver={(e) => handleRootDragOver(e, sidebarOrder.length)}
+              onDrop={(e) => handleRootDrop(e, sidebarOrder.length)}
+            />
+          </>
         )}
       </div>
 

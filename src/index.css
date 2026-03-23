@@ -203,6 +203,61 @@ body {
 .nb-new-btn:hover { background: var(--nb-accent-hover); transform: translateY(-1px); }
 .nb-new-btn:active { transform: translateY(0); }
 
+/* ── Sidebar actions row (new note + new folder) ─────────── */
+.nb-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 12px;
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+
+.nb-sidebar-actions .nb-new-btn {
+  margin: 0;
+  flex: 1;
+}
+
+.nb-new-folder-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--nb-border);
+  border-radius: 8px;
+  color: var(--nb-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.nb-new-folder-btn:hover {
+  background: var(--nb-surface-alt);
+  border-color: var(--nb-border-hard);
+  color: var(--nb-text);
+}
+
+/* Inline new-folder name input */
+.nb-folder-name-input-wrap {
+  padding: 4px 12px;
+}
+
+.nb-folder-name-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--nb-bg);
+  border: 1px solid var(--nb-accent);
+  border-radius: 7px;
+  color: var(--nb-text);
+  font-family: 'Lora', Georgia, serif;
+  font-size: 13px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--nb-accent-soft);
+}
+
 /* ── Notes List ───────────────────────────────────────────── */
 .nb-notes-list {
   flex: 1;
@@ -285,6 +340,171 @@ body {
   font-size: 13.5px;
   font-style: italic;
   line-height: 1.6;
+}
+
+/* ── Drag handle on note cards ────────────────────────────── */
+.nb-note-card-drag-handle {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--nb-border-hard);
+  opacity: 0;
+  transition: opacity 0.12s;
+  cursor: grab;
+  pointer-events: none;
+}
+
+.nb-note-card:hover .nb-note-card-drag-handle { opacity: 1; }
+
+/* Cards with handle: shift content right a touch */
+.nb-note-card-title,
+.nb-note-card-preview,
+.nb-note-card-meta {
+  padding-left: 14px;
+}
+
+/* Drop target highlight */
+.nb-folder--drop-into > .nb-folder-header {
+  background: var(--nb-accent-soft);
+  border-left: 3px solid var(--nb-accent);
+}
+
+.nb-note-card--indented {
+  margin-left: 0;
+  border-left-color: transparent;
+}
+
+/* ── Folder row ───────────────────────────────────────────── */
+.nb-folder {
+  cursor: default;
+}
+
+.nb-folder-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px 7px 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.12s;
+  border-left: 3px solid transparent;
+}
+
+.nb-folder-header:hover { background: var(--nb-surface-alt); }
+
+.nb-folder-chevron {
+  display: flex;
+  align-items: center;
+  color: var(--nb-text-faint);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.nb-folder-chevron.open { transform: rotate(90deg); }
+
+.nb-folder-icon {
+  color: var(--nb-text-muted);
+  flex-shrink: 0;
+}
+
+.nb-folder-name {
+  font-family: 'Lora', Georgia, serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--nb-text);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nb-folder-count {
+  font-size: 10.5px;
+  color: var(--nb-text-faint);
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+/* Rename input inside folder header */
+.nb-folder-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--nb-bg);
+  border: 1px solid var(--nb-accent);
+  border-radius: 5px;
+  color: var(--nb-text);
+  font-family: 'Lora', Georgia, serif;
+  font-size: 12.5px;
+  outline: none;
+}
+
+/* Folder action buttons (add note, rename, delete) — hidden until hover */
+.nb-folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  flex-shrink: 0;
+}
+
+.nb-folder-header:hover .nb-folder-actions { opacity: 1; }
+
+.nb-folder-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--nb-text-muted);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.nb-folder-action-btn:hover { background: var(--nb-surface-alt); color: var(--nb-text); }
+
+.nb-folder-delete-btn:hover,
+.nb-folder-delete-btn.confirming {
+  background: var(--nb-danger-soft);
+  color: var(--nb-danger);
+}
+
+/* Notes inside a folder */
+.nb-folder-notes {
+  padding-left: 22px;
+}
+
+/* Drop zones — tall invisible hit target, thin colored line via ::before */
+.nb-folder-drop-zone,
+.nb-root-drop-zone {
+  height: 14px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.nb-folder-drop-zone::before,
+.nb-root-drop-zone::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.nb-folder-drop-zone.active::before,
+.nb-root-drop-zone.active::before {
+  background: var(--nb-accent);
 }
 
 /* ── Sidebar Footer ───────────────────────────────────────── */
