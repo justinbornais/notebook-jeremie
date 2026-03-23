@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { Note, Theme } from '../types';
 
 interface SidebarProps {
@@ -11,6 +11,8 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  onExport: () => void;
+  onImport: (file: File) => void;
   onToggleTheme: () => void;
 }
 
@@ -55,9 +57,12 @@ export default function Sidebar({
   onSelect,
   onCreate,
   onDelete,
+  onExport,
+  onImport,
   onToggleTheme,
 }: SidebarProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const deleteTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
 
@@ -207,6 +212,36 @@ export default function Sidebar({
 
       {/* Footer */}
       <footer className="nb-sidebar-footer">
+        <div className="nb-io-btns">
+          <button className="nb-io-btn" onClick={onExport} title="Export all notes as JSON">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export
+          </button>
+          <button className="nb-io-btn" onClick={() => importInputRef.current?.click()} title="Import notes from JSON">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Import
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onImport(file);
+              e.target.value = '';
+            }}
+            aria-hidden="true"
+          />
+        </div>
         <div>
           By{' '}
           <a href="https://github.com/jere-mie" target="_blank" rel="noopener noreferrer">

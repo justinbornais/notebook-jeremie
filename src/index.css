@@ -67,14 +67,37 @@ body {
 
 /* ── Sidebar ──────────────────────────────────────────────── */
 .nb-sidebar {
-  width: 290px;
-  min-width: 290px;
+  width: var(--nb-sidebar-width, 290px);
+  min-width: var(--nb-sidebar-width, 290px);
   background: var(--nb-surface);
-  border-right: 1px solid var(--nb-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition: background-color 0.2s ease;
+}
+
+/* ── Resize handle ─────────────────────────────────────────── */
+.nb-resize-handle {
+  width: 1px;
+  background: var(--nb-border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  transition: background-color 0.15s;
+}
+
+/* Expand the interactive grab area without changing visual width */
+.nb-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  left: -4px;
+  right: -4px;
+}
+
+.nb-resize-handle:hover {
+  background: var(--nb-accent);
 }
 
 .nb-sidebar-top {
@@ -281,6 +304,32 @@ body {
 }
 
 .nb-sidebar-footer a:hover { color: var(--nb-accent); }
+
+.nb-io-btns {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.nb-io-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--nb-border);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--nb-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.nb-io-btn:hover {
+  background: var(--nb-surface-alt);
+  border-color: var(--nb-border-hard);
+  color: var(--nb-text);
+}
 
 /* ── Editor Pane ──────────────────────────────────────────── */
 .nb-editor {
@@ -651,10 +700,13 @@ body {
 @media (max-width: 768px) {
   .nb-shell { flex-direction: column; }
 
+  .nb-resize-handle {
+    display: none;
+  }
+
   .nb-sidebar {
     width: 100%;
     min-width: unset;
-    border-right: none;
     border-bottom: 1px solid var(--nb-border);
   }
 

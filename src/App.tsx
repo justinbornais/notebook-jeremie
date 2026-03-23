@@ -5,6 +5,7 @@ import Editor from './components/Editor';
 
 const NOTES_KEY = 'notebook-notes';
 const THEME_KEY = 'notebook-theme';
+const SIDEBAR_WIDTH_KEY = 'notebook-sidebar-width';
 
 function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
@@ -44,6 +45,41 @@ export default function App() {
   const [mobileView, setMobileView] = useState<'list' | 'editor'>('editor');
   const [sidebarVisible, setSidebarVisible] = useState(true);
 
+  const handleExport = () => {
+    const blob = new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `notebook-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const imported = JSON.parse(e.target?.result as string) as Note[];
+        if (!Array.isArray(imported)) return;
+        const valid = imported.filter(
+          (n) => typeof n.id === 'string' && typeof n.title === 'string' && typeof n.content === 'string'
+        );
+        setNotes((prev) => {
+          const existing = new Set(prev.map((n) => n.id));
+          const incoming = valid.filter((n) => !existing.has(n.id));
+          return [...prev, ...incoming];
+        });
+      } catch {
+        // ignore malformed files
+      }
+    };
+    reader.readAsText(file);
+  };
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    return saved ? parseInt(saved, 10) : 290;
+  });
+
   // Apply theme class + persist
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -54,6 +90,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
   }, [notes]);
+
+  // Persist sidebar width
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
 
   const filteredNotes = notes
     .filter((n) => {
@@ -127,10 +168,34 @@ export default function App() {
     if (currentIdx === -1) return;
     const nextIdx =
       direction === 'down'
-        ? Math.min(currentIdx + 1, navList.length - 1)
-        : Math.max(currentIdx - 1, 0);
+        ? (currentIdx + 1) % navList.length
+        : (currentIdx - 1 + navList.length) % navList.length;
     if (nextIdx !== currentIdx) selectNote(navList[nextIdx].id);
   }, [draft, filteredNotes, selectedId, selectNote]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const next = Math.min(520, Math.max(160, startWidth + ev.clientX - startX));
+      setSidebarWidth(next);
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
 
   // Ctrl+Up / Ctrl+Down for non-Monaco contexts (sidebar, title field, etc.)
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -148,6 +213,7 @@ export default function App() {
     <div className={`nb-shell${sidebarVisible ? '' : ' nb-sidebar-collapsed'}`}>
       <aside
         className={`nb-sidebar${mobileView === 'editor' ? ' nb-mobile-hide' : ''}`}
+        style={{ '--nb-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
       >
         <Sidebar
           notes={filteredNotes}
@@ -159,9 +225,14 @@ export default function App() {
           onSelect={selectNote}
           onCreate={createNote}
           onDelete={deleteNote}
+          onExport={handleExport}
+          onImport={handleImport}
           onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
         />
       </aside>
+      {sidebarVisible && (
+        <div className="nb-resize-handle" onMouseDown={handleResizeStart} aria-hidden="true" />
+      )}
       <main
         className={`nb-editor${mobileView === 'list' ? ' nb-mobile-hide' : ''}`}
       >
