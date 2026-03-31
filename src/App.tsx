@@ -40,6 +40,13 @@ function readPreferredLanguage(): string {
   }
 }
 
+function isMacOS(): boolean {
+  if (typeof navigator === 'undefined') return false;
+
+  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
+  return /mac/i.test(platform);
+}
+
 function makeBlankNote(isCode = false, language = 'markdown'): Note {
   return {
     id: uid(),
@@ -55,6 +62,8 @@ function makeBlankNote(isCode = false, language = 'markdown'): Note {
 const initialDraft = makeBlankNote(readPreferredIsCode(), readPreferredLanguage());
 
 export default function App() {
+  const macOS = isMacOS();
+  const newNoteShortcutLabel = macOS ? 'Cmd+Enter' : 'Ctrl+Enter';
   const [preferredIsCode, setPreferredIsCode] = useState(readPreferredIsCode);
   const [preferredLanguage, setPreferredLanguage] = useState(readPreferredLanguage);
   const [notes, setNotes] = useState<Note[]>(() => {
@@ -353,6 +362,11 @@ export default function App() {
   };
 
   const selectNote = useCallback((id: string) => {
+    if (id === selectedId) {
+      setMobileView('editor');
+      return;
+    }
+
     // Discard an unedited draft when navigating to another note
     if (draft && draft.id === selectedId) {
       setDraft(null);
@@ -452,22 +466,22 @@ export default function App() {
     const hasPrimaryModifier = e.ctrlKey || e.metaKey;
     if (!hasPrimaryModifier) return;
 
-    if (e.key === 'p' || e.key === 'P') {
-      if (e.altKey) return;
+    if (e.code === 'KeyP') {
+      if (e.altKey || e.shiftKey) return;
       e.preventDefault();
       focusSearch();
       return;
     }
 
-    if (e.key === 'n' || e.key === 'N') {
-      if (!e.altKey) return;
+    if (e.key === 'Enter') {
+      if (e.altKey || e.shiftKey) return;
       e.preventDefault();
       createNote();
       return;
     }
 
-    if (e.key === 'b' || e.key === 'B') {
-      if (e.altKey) return;
+    if (e.code === 'KeyB') {
+      if (e.altKey || e.shiftKey) return;
       e.preventDefault();
       setSidebarVisible((visible) => !visible);
       return;
@@ -503,6 +517,7 @@ export default function App() {
           query={query}
           theme={theme}
           totalCount={notes.length}
+          newNoteShortcutHint={newNoteShortcutLabel}
           onQueryChange={setQuery}
           onSelect={selectNote}
           onCreate={createNote}

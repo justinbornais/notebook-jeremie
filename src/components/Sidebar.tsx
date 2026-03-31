@@ -14,6 +14,7 @@ interface SidebarProps {
   query: string;
   theme: Theme;
   totalCount: number;
+  newNoteShortcutHint: string;
   onQueryChange: (q: string) => void;
   onSelect: (id: string) => void;
   onCreate: (folderId?: string) => void;
@@ -81,6 +82,7 @@ export default function Sidebar({
   query,
   theme,
   totalCount,
+  newNoteShortcutHint,
   onQueryChange,
   onSelect,
   onCreate,
@@ -395,7 +397,12 @@ export default function Sidebar({
 
       {/* New Note + New Folder buttons */}
       <div className="nb-sidebar-actions">
-        <button className="nb-new-btn" onClick={() => onCreate()} aria-label="Create new note">
+        <button
+          className="nb-new-btn"
+          onClick={() => onCreate()}
+          aria-label={`Create new note. Shortcut: ${newNoteShortcutHint}`}
+          title={`Create new note (${newNoteShortcutHint})`}
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/>
             <line x1="5" y1="12" x2="19" y2="12"/>
