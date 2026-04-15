@@ -29,6 +29,14 @@ interface SidebarProps {
   onExport: () => void;
   onImport: (file: File) => void;
   onToggleTheme: () => void;
+  // Filesystem storage props
+  fsSupported: boolean;
+  folderPath: string | null;
+  fsSaving: boolean;
+  onSaveToFolder: () => void;
+  onLoadFromFolder: () => void;
+  onDisconnectFolder: () => void;
+  onUploadFile: (file: File) => void;
 }
 
 function formatDate(ts: number): string {
@@ -97,8 +105,16 @@ export default function Sidebar({
   onExport,
   onImport,
   onToggleTheme,
+  fsSupported,
+  folderPath,
+  fsSaving,
+  onSaveToFolder,
+  onLoadFromFolder,
+  onDisconnectFolder,
+  onUploadFile,
 }: SidebarProps) {
   const importInputRef = useRef<HTMLInputElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const noteCardRefs = useRef(new Map<string, HTMLDivElement>());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -694,6 +710,75 @@ export default function Sidebar({
 
       {/* Footer */}
       <footer className="nb-sidebar-footer">
+        {/* Filesystem storage */}
+        {fsSupported && (
+          <div className="nb-fs-section">
+            {folderPath ? (
+              <>
+                <div className="nb-fs-status">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  <span className="nb-fs-path" title={folderPath}>{folderPath}</span>
+                  {fsSaving && <span className="nb-fs-saving">Saving…</span>}
+                  {!fsSaving && <span className="nb-fs-saved">Synced</span>}
+                </div>
+                <div className="nb-fs-btns">
+                  <button className="nb-io-btn" onClick={onSaveToFolder} title="Change folder">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    Change
+                  </button>
+                  <button className="nb-io-btn" onClick={() => uploadInputRef.current?.click()} title="Upload file to folder">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Upload
+                  </button>
+                  <button className="nb-io-btn" onClick={onDisconnectFolder} title="Disconnect from folder">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                    Disconnect
+                  </button>
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) onUploadFile(file);
+                      e.target.value = '';
+                    }}
+                    aria-hidden="true"
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="nb-fs-btns">
+                <button className="nb-io-btn" onClick={onSaveToFolder} title="Save notebook to a local folder">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                    <polyline points="17 21 17 13 7 13 7 21"/>
+                    <polyline points="7 3 7 8 15 8"/>
+                  </svg>
+                  Save to folder
+                </button>
+                <button className="nb-io-btn" onClick={onLoadFromFolder} title="Load notebook from a local folder">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Open folder
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="nb-io-btns">
           <button className="nb-io-btn" onClick={onExport} title="Export all notes as JSON">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

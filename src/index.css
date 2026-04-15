@@ -552,6 +552,55 @@ body {
   color: var(--nb-text);
 }
 
+/* ── Filesystem storage section ───────────────────────────── */
+.nb-fs-section {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--nb-border);
+}
+
+.nb-fs-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--nb-text-muted);
+  margin-bottom: 6px;
+  min-height: 20px;
+}
+
+.nb-fs-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.nb-fs-saving {
+  font-size: 10px;
+  color: var(--nb-accent);
+  flex-shrink: 0;
+  animation: nb-pulse 1.2s ease-in-out infinite;
+}
+
+.nb-fs-saved {
+  font-size: 10px;
+  color: var(--nb-text-faint);
+  flex-shrink: 0;
+}
+
+@keyframes nb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.nb-fs-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 /* ── Editor Pane ──────────────────────────────────────────── */
 .nb-editor {
   flex: 1;

@@ -1,7 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { LANGUAGES, type Note, type Folder, type SidebarItem, type Theme } from './types';
 import Sidebar from './components/Sidebar';
 import Editor from './components/Editor';
+import {
+  pickDirectory,
+  saveNotebook,
+  loadNotebook,
+  saveUploadedFile,
+  persistHandle,
+  loadPersistedHandle,
+  clearPersistedHandle,
+  verifyPermission,
+  isFileSystemAccessSupported,
+} from './fsStorage';
 
 const NOTES_KEY = 'notebook-notes';
 const THEME_KEY = 'notebook-theme';
@@ -107,6 +118,13 @@ export default function App() {
     }
   });
 
+  // Filesystem storage state
+  const [dirHandle, setDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [fsSaving, setFsSaving] = useState(false);
+  const fsSupportedRef = useRef(isFileSystemAccessSupported());
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // draft: open in editor but not yet in notes[]. Committed on first keystroke.
   const [draft, setDraft] = useState<Note | null>(initialDraft);
   const [selectedId, setSelectedId] = useState<string | null>(initialDraft.id);
@@ -196,6 +214,82 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
+
+  // ── Filesystem: restore persisted handle on mount ────────────────
+  useEffect(() => {
+    if (!fsSupportedRef.current) return;
+    loadPersistedHandle().then(async (handle) => {
+      if (!handle) return;
+      try {
+        if (await verifyPermission(handle, 'readwrite')) {
+          setDirHandle(handle);
+          setFolderPath(handle.name);
+        }
+      } catch {
+        // permission denied or handle stale
+      }
+    });
+  }, []);
+
+  // ── Filesystem: debounced auto-save when data changes ────────────
+  useEffect(() => {
+    if (!dirHandle) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      setFsSaving(true);
+      saveNotebook(dirHandle, notes, folders, sidebarOrder, folderContents)
+        .catch(() => {/* ignore write errors */})
+        .finally(() => setFsSaving(false));
+    }, 1000);
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [dirHandle, notes, folders, sidebarOrder, folderContents]);
+
+  // ── Filesystem: pick folder to save to ───────────────────────────
+  const handleSaveToFolder = useCallback(async () => {
+    const handle = await pickDirectory();
+    if (!handle) return;
+    setDirHandle(handle);
+    setFolderPath(handle.name);
+    await persistHandle(handle);
+    setFsSaving(true);
+    try {
+      await saveNotebook(handle, notes, folders, sidebarOrder, folderContents);
+    } finally {
+      setFsSaving(false);
+    }
+  }, [notes, folders, sidebarOrder, folderContents]);
+
+  // ── Filesystem: load notebook from folder ────────────────────────
+  const handleLoadFromFolder = useCallback(async () => {
+    const handle = await pickDirectory();
+    if (!handle) return;
+    const data = await loadNotebook(handle);
+    setNotes(data.notes);
+    setFolders(data.folders);
+    setSidebarOrder(data.sidebarOrder);
+    setFolderContents(data.folderContents);
+    setDirHandle(handle);
+    setFolderPath(handle.name);
+    await persistHandle(handle);
+    setDraft(null);
+    setSelectedId(data.notes.length > 0 ? data.notes[0].id : null);
+  }, []);
+
+  // ── Filesystem: disconnect from folder ───────────────────────────
+  const handleDisconnectFolder = useCallback(async () => {
+    setDirHandle(null);
+    setFolderPath(null);
+    await clearPersistedHandle();
+  }, []);
+
+  // ── Filesystem: save imported file to disk ───────────────────────
+  const handleImportFile = useCallback(async (file: File) => {
+    if (dirHandle) {
+      await saveUploadedFile(dirHandle, file);
+    }
+  }, [dirHandle]);
 
   const savedNote = notes.find((n) => n.id === selectedId) ?? null;
 
@@ -534,6 +628,13 @@ export default function App() {
           onExport={handleExport}
           onImport={handleImport}
           onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          fsSupported={fsSupportedRef.current}
+          folderPath={folderPath}
+          fsSaving={fsSaving}
+          onSaveToFolder={handleSaveToFolder}
+          onLoadFromFolder={handleLoadFromFolder}
+          onDisconnectFolder={handleDisconnectFolder}
+          onUploadFile={handleImportFile}
         />
       </aside>
       {sidebarVisible && (
